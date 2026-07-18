@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Multi-AI Mock Interview App",
+  "description": "A professional multi-AI mock interview simulator featuring PDF resume text extraction and real-time behavioral/technical coaching tips powered by Google Gemini and OpenAI GPT-4.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
