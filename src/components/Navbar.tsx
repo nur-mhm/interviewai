@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brain, Bot, Key, Settings, Briefcase } from 'lucide-react';
+import { Brain, Bot, Key, Settings, Briefcase, Sun, Moon } from 'lucide-react';
 import { Provider } from '../types';
 
 interface NavbarProps {
@@ -8,6 +8,8 @@ interface NavbarProps {
   onReset: () => void;
   showSetup: boolean;
   setShowSetup: (show: boolean) => void;
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
 }
 
 export default function Navbar({
@@ -16,6 +18,8 @@ export default function Navbar({
   onReset,
   showSetup,
   setShowSetup,
+  theme,
+  onToggleTheme,
 }: NavbarProps) {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-800 bg-[#0D0D0D]/80 backdrop-blur-md">
@@ -37,6 +41,20 @@ export default function Navbar({
 
         {/* Action Controls */}
         <div className="flex items-center gap-3">
+          {/* Theme Toggle Button */}
+          <button
+            onClick={onToggleTheme}
+            id="theme-toggle-btn"
+            className="flex h-8.5 w-8.5 items-center justify-center rounded-lg border border-slate-800 bg-[#161616] text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+            title={theme === 'light' ? 'Switch to Dark Theme' : 'Switch to High-Contrast Light Theme'}
+          >
+            {theme === 'light' ? (
+              <Moon className="h-4 w-4 text-slate-500 hover:text-indigo-400" />
+            ) : (
+              <Sun className="h-4 w-4 text-amber-400 animate-pulse" />
+            )}
+          </button>
+
           {isConfigured && (
             <>
               <button

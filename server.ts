@@ -245,6 +245,145 @@ CRITICAL RECRUITER GUIDELINES:
     }
   });
 
+  // API: Analyze Performance handler
+  app.post('/api/analyze-performance', async (req: express.Request, res: express.Response) => {
+    try {
+      const { messages, provider, geminiKey, openaiKey, resume, jobContext } = req.body;
+
+      if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ error: 'Messages are required and must be an array.' });
+      }
+
+      const companyName = jobContext?.company || 'Target Company';
+      const jobRole = jobContext?.role || 'Job Role';
+
+      const systemInstruction = `You are an expert senior recruiter and elite interview preparation coach.
+Analyze the candidate's interaction history for the position "${jobRole}" at "${companyName}".
+Based on their answers, technical expertise, STAR framework structure, quantitative metrics, and overall confidence:
+Provide a rigorous yet constructive performance review.
+
+You MUST respond ONLY with a valid, clean JSON object (do not wrap in markdown \`\`\`json blocks, just return raw JSON).
+The JSON object must have this exact structure:
+{
+  "strengths": [
+    "Specific Strength 1 (e.g., 'Articulates clear situation context in behavioral responses')",
+    "Specific Strength 2 (e.g., 'Demonstrates sound technical understanding of systems architecture')",
+    "Specific Strength 3"
+  ],
+  "improvements": [
+    "Actionable Improvement 1 (e.g., 'Quantify impact. Add metrics like % improvements, time saved, or team sizes')",
+    "Actionable Improvement 2",
+    "Actionable Improvement 3"
+  ],
+  "overallScore": 85,
+  "summary": "A 2-3 sentence inspiring, professional overview of the candidate's preparedness and next key study recommendations."
+}
+
+Contextual Guidelines:
+- If the candidate has answered fewer than 2 questions, analyze their starting alignment based on their Resume and suggest they practice more questions.
+- Maintain high professional standards but keep it encouraging.
+`;
+
+      const contents = [
+        {
+          role: 'user' as const,
+          parts: [{ text: `Here is the interview session history:
+---
+${messages.map((m: any) => `${m.role === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`).join('\n\n')}
+---
+And candidate's resume context:
+${resume || 'No resume context provided.'}
+
+Generate the JSON performance evaluation now.` }]
+        }
+      ];
+
+      let rawText = '';
+
+      if (provider === 'gemini') {
+        const apiKey = geminiKey || process.env.GEMINI_API_KEY;
+        if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+          return res.status(400).json({ 
+            error: 'Gemini API key is required. Please set GEMINI_API_KEY in the environment or provide a key in the settings panel.' 
+          });
+        }
+
+        const ai = new GoogleGenAI({ apiKey });
+        // Robust fallback model list to handle "503 high demand / service unavailable" errors
+        const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.5-flash'];
+        let success = false;
+        let lastError: any = null;
+
+        for (const modelName of modelsToTry) {
+          try {
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents: contents,
+              config: {
+                systemInstruction: systemInstruction,
+                temperature: 0.2,
+                responseMimeType: 'application/json'
+              }
+            });
+            
+            if (response && response.text) {
+              rawText = response.text;
+              success = true;
+              break;
+            }
+          } catch (err: any) {
+            console.warn(`[Gemini Performance Analysis] Failed attempt with model: ${modelName}. Error:`, err.message || err);
+            lastError = err;
+          }
+        }
+
+        if (!success) {
+          throw lastError || new Error('All configured Gemini models failed or are currently unavailable.');
+        }
+
+      } else if (provider === 'openai') {
+        const apiKey = openaiKey || process.env.OPENAI_API_KEY;
+        if (!apiKey || apiKey === 'MY_OPENAI_API_KEY') {
+          return res.status(400).json({ 
+            error: 'OpenAI API key is required. Please set OPENAI_API_KEY in the environment or provide a key in the settings panel.' 
+          });
+        }
+
+        const openai = new OpenAI({ apiKey });
+
+        const response = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: contents[0].parts[0].text }
+          ],
+          temperature: 0.2,
+          response_format: { type: 'json_object' }
+        });
+
+        rawText = response.choices[0]?.message?.content || '';
+
+      } else {
+        return res.status(400).json({ error: `Invalid provider selected: ${provider}` });
+      }
+
+      // Clean up markdown block wraps if present
+      let cleanedText = rawText.trim();
+      if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```(json)?/, '').replace(/```$/, '').trim();
+      }
+
+      const parsedJSON = JSON.parse(cleanedText);
+      return res.json(parsedJSON);
+
+    } catch (error: any) {
+      console.error('Performance analysis routing error:', error);
+      return res.status(500).json({ 
+        error: `Failed to analyze performance: ${error?.message || error}` 
+      });
+    }
+  });
+
   // Integrate Vite Dev Server Middleware or Static Build Asset Serving
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

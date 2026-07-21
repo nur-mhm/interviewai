@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Bot, User, Send, Sparkles, RefreshCw, AlertCircle, FileText, 
   Building, Briefcase, ChevronRight, HelpCircle, ArrowLeft, Trophy, Info,
-  GraduationCap, BookOpen, Compass, ListTodo, ShieldAlert, Mic, MicOff
+  GraduationCap, BookOpen, Compass, ListTodo, ShieldAlert, Mic, MicOff,
+  CheckCircle2, AlertTriangle, Lightbulb, TrendingUp
 } from 'lucide-react';
 import { Message, SetupData } from '../types';
 
@@ -49,11 +50,167 @@ export default function ChatPanel({
   const [inputText, setInputText] = useState('');
   const [loadingStep, setLoadingStep] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   const [speechFeedback, setSpeechFeedback] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
+
+  const [isAnalysisOpen, setIsAnalysisOpen] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiPerformance, setAiPerformance] = useState<{
+    strengths: string[];
+    improvements: string[];
+    overallScore: number;
+    summary: string;
+  } | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'heuristic' | 'ai'>('heuristic');
+
+  // Dynamic heuristic analyzer that processes chat history in real-time
+  const getHeuristicAnalysis = () => {
+    const userMessages = messages.filter(m => m.role === 'user');
+    const totalAnswers = userMessages.length;
+    
+    const strengths: string[] = [];
+    const improvements: string[] = [];
+    let score = 50;
+    
+    if (setupData.resumeText) {
+      strengths.push("Resume parsed successfully & aligned with role target.");
+      score += 15;
+    } else {
+      improvements.push("Add a detailed resume profile to tailor the feedback precisely.");
+    }
+
+    let totalWords = 0;
+    let hasShortAnswer = false;
+    let hasQuantifiableMetrics = false;
+    let hasStarKeywords = false;
+
+    userMessages.forEach(msg => {
+      const text = msg.content.toLowerCase();
+      const words = msg.content.trim().split(/\s+/).length;
+      totalWords += words;
+
+      if (words < 30 && words > 3) {
+        hasShortAnswer = true;
+      }
+
+      // Look for numbers, %, or common metrics words
+      if (/\b\d+(%|\b)/.test(text) || text.includes('%') || text.includes('percent') || text.includes('million') || text.includes('thousand') || text.includes('metrics') || text.includes('kpi')) {
+        hasQuantifiableMetrics = true;
+      }
+
+      // Look for STAR keywords
+      if (text.includes('situation') || text.includes('task') || text.includes('action') || text.includes('result') || text.includes('s:') || text.includes('t:') || text.includes('a:') || text.includes('r:')) {
+        hasStarKeywords = true;
+      }
+    });
+
+    const avgWords = totalAnswers > 0 ? Math.round(totalWords / totalAnswers) : 0;
+
+    if (totalAnswers > 0) {
+      if (avgWords >= 60) {
+        strengths.push(`Rich depth: responses average ${avgWords} words.`);
+        score += 20;
+      } else if (hasShortAnswer) {
+        improvements.push("Elaborate further: describe your context and process more thoroughly.");
+        score -= 10;
+      } else {
+        strengths.push(`Steady explanation length (Avg: ${avgWords} words).`);
+        score += 10;
+      }
+
+      if (hasQuantifiableMetrics) {
+        strengths.push("Quantified accomplishments: uses metrics/numbers to prove impact.");
+        score += 15;
+      } else {
+        improvements.push("Mention hard metrics: state exact %, revenue, speeds, or sizes.");
+      }
+
+      if (hasStarKeywords) {
+        strengths.push("STAR storytelling: structured your descriptions well.");
+        score += 15;
+      } else {
+        improvements.push("Adopt the STAR method: explicitly separate Situation, Task, Action, Result.");
+      }
+    } else {
+      improvements.push("Practice answering your first mock question to populate live behavioral metrics.");
+    }
+
+    const finalScore = Math.min(100, Math.max(0, score));
+
+    let summary = "";
+    if (totalAnswers === 0) {
+      summary = `Your mock interview preparation dashboard is ready! Once you start answering questions, this board will analyze your speaking length, structural metrics, and STAR compliance.`;
+    } else if (finalScore >= 80) {
+      summary = `Outstanding! Your responses show an excellent balance of structure, elaboration, and quantifiable results. Keep this up!`;
+    } else if (finalScore >= 65) {
+      summary = `Good progress! Your answers are informative, but you can elevate them by wrapping them tightly in the STAR template and adding specific metrics.`;
+    } else {
+      summary = `Keep practicing. Try explaining your exact actions and the quantifiable results of your work in greater depth.`;
+    }
+
+    return {
+      strengths,
+      improvements,
+      overallScore: finalScore,
+      summary
+    };
+  };
+
+  const runAiPerformanceAudit = async () => {
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    try {
+      const response = await fetch('/api/analyze-performance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: messages,
+          provider: setupData.provider,
+          geminiKey: setupData.geminiKey,
+          openaiKey: setupData.openaiKey,
+          resume: setupData.resumeText,
+          jobContext: setupData.jobContext,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error (${response.status})`);
+      }
+
+      const data = await response.json();
+      setAiPerformance({
+        strengths: Array.isArray(data.strengths) ? data.strengths : [],
+        improvements: Array.isArray(data.improvements) ? data.improvements : [],
+        overallScore: typeof data.overallScore === 'number' ? data.overallScore : 80,
+        summary: data.summary || "No executive summary was generated."
+      });
+      setActiveTab('ai');
+    } catch (err: any) {
+      console.error("AI Audit Error:", err);
+      setAnalysisError(err?.message || "An unexpected error occurred while analyzing performance.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const heuristicAnalysis = getHeuristicAnalysis();
+
+  const activePerformance = activeTab === 'ai' && aiPerformance 
+    ? aiPerformance 
+    : {
+        strengths: heuristicAnalysis.strengths,
+        improvements: heuristicAnalysis.improvements,
+        overallScore: heuristicAnalysis.overallScore,
+        summary: heuristicAnalysis.summary
+      };
 
   useEffect(() => {
     const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -176,8 +333,21 @@ export default function ChatPanel({
     'Finalizing interview scores...'
   ];
 
+  const scrollToBottom = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    } else {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    scrollToBottom();
+    const timer = setTimeout(scrollToBottom, 120);
+    return () => clearTimeout(timer);
   }, [messages, isLoading]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -379,7 +549,7 @@ export default function ChatPanel({
 
 
       {/* Main Chat Interface */}
-      <div className="lg:col-span-9 flex flex-col rounded-2xl border border-slate-800 bg-[#0D0D0D] shadow-sm overflow-hidden order-1 lg:order-2 h-full">
+      <div className={`${isAnalysisOpen ? 'lg:col-span-6' : 'lg:col-span-9'} flex flex-col rounded-2xl border border-slate-800 bg-[#0D0D0D] shadow-sm overflow-hidden order-1 lg:order-2 h-full`}>
         {/* Recruiter / Coach Header */}
         <div className="border-b border-slate-800 bg-[#111111] px-4 py-3.5 sm:px-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -406,14 +576,30 @@ export default function ChatPanel({
             </div>
           </div>
 
-          <div className="text-[11px] text-slate-500 flex items-center gap-1 font-mono">
-            <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${isCoachMode ? 'bg-indigo-400' : 'bg-emerald-500'}`}></span>
-            {isCoachMode ? 'COACH ACTIVE' : 'SIMULATION LIVE'}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsAnalysisOpen(!isAnalysisOpen)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                isAnalysisOpen 
+                  ? 'bg-indigo-600/10 text-indigo-400 border-indigo-500/30'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+              }`}
+              title="Toggle Performance Analysis Board"
+            >
+              <Trophy className="h-3.5 w-3.5 text-amber-400" />
+              <span>{isAnalysisOpen ? 'Hide Analysis' : 'Show Analysis'}</span>
+            </button>
+
+            <div className="hidden sm:flex text-[11px] text-slate-500 items-center gap-1 font-mono">
+              <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${isCoachMode ? 'bg-indigo-400' : 'bg-emerald-500'}`}></span>
+              {isCoachMode ? 'COACH ACTIVE' : 'SIMULATION LIVE'}
+            </div>
           </div>
         </div>
 
         {/* Message Thread Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 min-h-0 bg-[#0A0A0A]">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 min-h-0 bg-[#0A0A0A]">
           <AnimatePresence initial={false}>
             {messages.map((msg, index) => {
               const isAssistant = msg.role === 'assistant';
@@ -706,6 +892,201 @@ export default function ChatPanel({
         </div>
 
       </div>
+
+      {/* Performance Analysis Sidebar Panel */}
+      {isAnalysisOpen && (
+        <motion.div 
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="lg:col-span-3 order-3 flex flex-col gap-4 h-full overflow-y-auto pb-4"
+          id="performance-analysis-panel"
+        >
+          {/* Header Card */}
+          <div className="rounded-xl border border-slate-800 bg-[#0D0D0D] p-4 shadow-sm flex flex-col gap-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                <Trophy className="h-3.5 w-3.5 text-amber-500" />
+                Performance Board
+              </h4>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 font-mono">
+                {activeTab === 'ai' ? 'AI AUDIT' : 'LIVE'}
+              </span>
+            </div>
+
+            {/* Score circle */}
+            <div className="flex flex-col items-center justify-center py-4 bg-slate-950/40 rounded-xl border border-slate-900">
+              <div className="relative flex items-center justify-center h-24 w-24">
+                {/* SVG circular progress */}
+                <svg className="absolute transform -rotate-90 w-full h-full">
+                  <circle
+                    cx="48"
+                    cy="48"
+                    r="40"
+                    stroke="#1e293b"
+                    strokeWidth="6"
+                    fill="transparent"
+                  />
+                  <circle
+                    cx="48"
+                    cy="48"
+                    r="40"
+                    stroke={activePerformance.overallScore >= 80 ? '#10b981' : activePerformance.overallScore >= 65 ? '#f59e0b' : '#6366f1'}
+                    strokeWidth="6"
+                    fill="transparent"
+                    strokeDasharray={2 * Math.PI * 40}
+                    strokeDashoffset={2 * Math.PI * 40 * (1 - activePerformance.overallScore / 100)}
+                    className="transition-all duration-1000 ease-out"
+                  />
+                </svg>
+                <div className="flex flex-col items-center justify-center z-10">
+                  <span className="text-2xl font-extrabold text-white tracking-tight">
+                    {activePerformance.overallScore}
+                  </span>
+                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                    Score
+                  </span>
+                </div>
+              </div>
+              <p className="text-[11px] font-medium text-slate-400 mt-3 flex items-center gap-1">
+                <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+                <span>Interactive Rating</span>
+              </p>
+            </div>
+
+            {/* Tabs */}
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[#161616] border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setActiveTab('heuristic')}
+                className={`rounded-md py-1.5 text-[10px] font-bold transition-all cursor-pointer text-center ${
+                  activeTab === 'heuristic'
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Live Metrics
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (aiPerformance) {
+                    setActiveTab('ai');
+                  } else {
+                    runAiPerformanceAudit();
+                  }
+                }}
+                className={`rounded-md py-1.5 text-[10px] font-bold transition-all cursor-pointer text-center flex items-center justify-center gap-1 ${
+                  activeTab === 'ai'
+                    ? 'bg-indigo-600/20 text-indigo-450 border border-indigo-500/20 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <Sparkles className="h-3 w-3 text-indigo-400" />
+                AI Deep Audit
+              </button>
+            </div>
+
+            {/* Executive summary */}
+            <p className="text-[11px] text-slate-350 leading-relaxed bg-slate-900/35 p-3 rounded-lg border border-slate-850">
+              {activePerformance.summary}
+            </p>
+
+            {/* Run Audit button */}
+            <button
+              type="button"
+              disabled={isAnalyzing || messages.length === 0}
+              onClick={runAiPerformanceAudit}
+              className={`w-full py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                messages.length === 0
+                  ? 'bg-slate-850 text-slate-600 border border-slate-800 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md'
+              }`}
+            >
+              {isAnalyzing ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <span>Auditing History...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5 text-indigo-200" />
+                  <span>{aiPerformance ? 'Re-Run AI Performance Audit' : 'Request AI Performance Audit'}</span>
+                </>
+              )}
+            </button>
+            {messages.length === 0 && (
+              <p className="text-[9px] text-slate-600 text-center leading-normal">
+                Answer at least 1 question to activate full AI performance audit.
+              </p>
+            )}
+          </div>
+
+          {/* Strengths Card */}
+          <div className="rounded-xl border border-emerald-950/50 bg-emerald-950/10 p-4 shadow-sm space-y-3">
+            <h4 className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+              Candidate Strengths
+            </h4>
+            
+            {activePerformance.strengths.length > 0 ? (
+              <ul className="space-y-2">
+                {activePerformance.strengths.map((str, index) => (
+                  <motion.li 
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    key={index} 
+                    className="text-[11px] text-slate-300 flex items-start gap-2 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-2.5 leading-normal"
+                  >
+                    <span className="text-emerald-400 font-bold mt-0.5">•</span>
+                    <span>{str}</span>
+                  </motion.li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[11px] text-slate-500 italic">No key strengths registered yet.</p>
+            )}
+          </div>
+
+          {/* Areas for Improvement Card */}
+          <div className="rounded-xl border border-amber-950/50 bg-amber-950/10 p-4 shadow-sm space-y-3">
+            <h4 className="text-[10px] font-bold uppercase tracking-widest text-amber-400 flex items-center gap-1.5">
+              <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+              Areas for Improvement
+            </h4>
+            
+            {activePerformance.improvements.length > 0 ? (
+              <ul className="space-y-2">
+                {activePerformance.improvements.map((imp, index) => (
+                  <motion.li 
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    key={index} 
+                    className="text-[11px] text-slate-300 flex items-start gap-2 bg-amber-950/20 border border-amber-900/30 rounded-lg p-2.5 leading-normal"
+                  >
+                    <span className="text-amber-400 font-bold mt-0.5">•</span>
+                    <span>{imp}</span>
+                  </motion.li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[11px] text-slate-500 italic">No registered areas for improvement.</p>
+            )}
+          </div>
+
+          {/* Error display if any */}
+          {analysisError && (
+            <div className="rounded-xl border border-red-500/30 bg-red-950/10 p-3 text-xs text-red-400 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-red-300">Audit Failed</p>
+                <p className="text-[10px] leading-normal">{analysisError}</p>
+              </div>
+            </div>
+          )}
+        </motion.div>
+      )}
 
     </div>
   );

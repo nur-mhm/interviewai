@@ -22,6 +22,10 @@ const defaultSetupData: SetupData = {
 };
 
 export default function App() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('mock_interview_theme_v1') as 'dark' | 'light') || 'dark';
+  });
+
   const [setupData, setSetupData] = useState<SetupData>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY_SETUP);
     return saved ? JSON.parse(saved) : defaultSetupData;
@@ -42,6 +46,24 @@ export default function App() {
   const [showSetup, setShowSetup] = useState<boolean>(!isConfigured);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorBanner, setErrorBanner] = useState<string>('');
+
+  const handleToggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('mock_interview_theme_v1', next);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (theme === 'light') {
+      document.documentElement.classList.add('light-theme');
+      document.body.classList.add('light-theme');
+    } else {
+      document.documentElement.classList.remove('light-theme');
+      document.body.classList.remove('light-theme');
+    }
+  }, [theme]);
 
   // Persist setup data
   useEffect(() => {
@@ -207,7 +229,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] flex flex-col font-sans text-slate-200" id="app-root-container">
+    <div className={`min-h-screen bg-[#0A0A0A] flex flex-col font-sans text-slate-200 transition-colors duration-300 ${theme === 'light' ? 'light-theme' : ''}`} id="app-root-container">
       {/* Navbar section */}
       <Navbar
         currentProvider={setupData.provider}
@@ -215,6 +237,8 @@ export default function App() {
         onReset={handleReset}
         showSetup={showSetup}
         setShowSetup={setShowSetup}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
       {/* Main Content Area */}
