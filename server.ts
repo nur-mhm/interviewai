@@ -171,16 +171,41 @@ CRITICAL RECRUITER GUIDELINES:
           parts: [{ text: msg.content }]
         }));
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
-          contents: contents,
-          config: {
-            systemInstruction: systemInstruction,
-            temperature: 0.7,
-          }
-        });
+        // Robust fallback model list to handle "503 high demand / service unavailable" errors
+        const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.5-flash'];
+        let responseText = '';
+        let success = false;
+        let lastError: any = null;
 
-        return res.json({ text: response.text || 'I apologize, I could not generate a response.' });
+        for (const modelName of modelsToTry) {
+          try {
+            console.log(`[Gemini Engine] Attempting chat completion using model: ${modelName}`);
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents: contents,
+              config: {
+                systemInstruction: systemInstruction,
+                temperature: 0.7,
+              }
+            });
+            
+            if (response && response.text) {
+              responseText = response.text;
+              success = true;
+              console.log(`[Gemini Engine] Successfully completed request with model: ${modelName}`);
+              break;
+            }
+          } catch (err: any) {
+            console.warn(`[Gemini Engine] Failed attempt with model: ${modelName}. Error:`, err.message || err);
+            lastError = err;
+          }
+        }
+
+        if (!success) {
+          throw lastError || new Error('All configured Gemini models failed or are currently unavailable.');
+        }
+
+        return res.json({ text: responseText || 'I apologize, I could not generate a response.' });
 
       } else if (provider === 'openai') {
         const apiKey = openaiKey || process.env.OPENAI_API_KEY;
